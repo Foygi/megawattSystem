@@ -1,0 +1,11 @@
+# Segredos e variáveis locais
+.env
+.env.*
+!.env.example
+supabase/functions/.env
+
+# Dependências e arquivos temporários
+node_modules/
+.DS_Store
+.vscode/
+*.log
