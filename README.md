@@ -41,7 +41,7 @@ values (
 );
 ```
 
-Use exatamente o mesmo e-mail usado ao criar o usuário em Authentication. A partir daí, entre no Megawatt Gestão com esse e-mail e a senha criada. O cadastro dos demais funcionários será feito pela tela **Usuários**.
+Use exatamente o mesmo e-mail usado ao criar o usuário em Authentication. O perfil inicial deve ter um `username` único (por exemplo, `admin`). Depois de publicar a Edge Function `login-by-username`, o acesso ao Megawatt será feito com esse nome de usuário e a senha criada. O cadastro dos demais funcionários será feito pela tela **Usuários**.
 
 ## 3. Publicar a Edge Function administrativa
 
@@ -53,6 +53,7 @@ Instale o Supabase CLI e, no terminal, dentro desta pasta do projeto:
 supabase login
 supabase link --project-ref SEU_PROJECT_REF
 supabase functions deploy admin-manage-user
+supabase functions deploy login-by-username
 ```
 
 O `project-ref` aparece na URL do projeto ou nas configurações do projeto. A função usa as variáveis de ambiente fornecidas pelo Supabase (`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEYS` e `SUPABASE_SECRET_KEYS`, com compatibilidade para as chaves legadas). Não é necessário copiar uma chave secreta para o repositório.
@@ -89,4 +90,42 @@ As permissões no banco são aplicadas por Row Level Security (RLS), não apenas
 - Nunca publique `service_role`, `secret key`, senha de administrador, token de acesso ou arquivo `.env`.
 - Nunca habilite acesso anônimo às tabelas internas.
 - Antes de usar com dados reais, teste cada perfil em uma sessão separada: administrador, editor e leitor.
-- O estado operacional (tarefas, contatos, links e anotações) fica em um registro JSON compartilhado. Para uma equipe pequena é simples de manter; se houver muitos usuários editando simultaneamente, a próxima evolução recomendada é separar cada tipo de dado em tabelas próprias para reduzir conflitos de atualização.
+- Contatos, links, anotações e preferências globais continuam no registro compartilhado; as tarefas foram separadas em linhas individuais na tabela `workspace_tasks` para reduzir conflitos de atualização simultânea.
+
+## Atualizações Megawatt — novembro/2026
+
+Antes de publicar a versão atualizada, execute no **SQL Editor** do Supabase o arquivo `supabase/migrations/20261117_megawatt_updates.sql`. Essa migração:
+
+- cria a tabela de histórico de pesagens, com acesso autenticado e exclusão restrita a administradores;
+- configura a limpeza de pesagens com mais de 24 horas (pg_cron quando disponível; a aplicação também limpa ao abrir/consultar o histórico, ao lançar pesagens e a cada cinco minutos enquanto houver uma sessão ativa);
+- cria uma tabela própria para tarefas, evitando que a criação de uma tarefa por um funcionário substitua a tarefa criada simultaneamente por outro;
+- habilita as tabelas necessárias no Supabase Realtime.
+
+### Login por nome de usuário
+
+A tela de login agora recebe nome de usuário e senha. Para manter o e-mail de autenticação protegido, o projeto usa a Edge Function `login-by-username` para localizar a conta e autenticar. Publique-a com:
+
+```bash
+supabase functions deploy login-by-username
+```
+
+A função usa a chave privilegiada somente no ambiente do Supabase. A seção `[functions.login-by-username] verify_jwt = false` já está no `supabase/config.toml`, pois o usuário ainda não possui sessão no momento do login. Não remova a validação de sessão da função administrativa `admin-manage-user`.
+
+### Conversor e tabela de referência
+
+A página **Conversor de fios** incorpora o conversor original em `https://foygi.github.io/wireConverter/` e também disponibiliza o cálculo dentro do Megawatt. A aba separada **Tabela de fios** é visível e editável somente por administradores (com a restrição aplicada também no banco). O conversor nativo usa essa tabela e as colunas:
+
+- `type`: tipo de produto;
+- `gauge`: bitola/produto;
+- `referenceWeight`: peso de referência em kg;
+- `referenceMeters`: metragem de referência em m.
+
+Os dados da tabela original não foram incluídos no ZIP recebido e não são expostos pelo conteúdo público legível da página externa. Portanto, o administrador deverá preencher a tabela interna com os dados oficiais da planilha. A tabela administrada alimenta o cálculo nativo do Megawatt; a página externa continua incorporada como acesso direto ao conversor original e não sincroniza sua própria planilha com o Megawatt. Os dados oficiais precisam ser cadastrados na aba **Tabela de fios** para que o cálculo nativo fique pronto. A fórmula de referência segue a proporção quantidade de referência ÷ peso de referência × peso informado, descrita no conversor original.
+
+### Histórico de pesagens
+
+Cada lançamento guarda data/hora, bitola, peso, metragem e usuário autenticado. O histórico fica visível aos usuários autenticados e a exclusão manual integral é restrita a administradores. Os registros expiram após 24 horas; o agendamento exato depende de `pg_cron` estar habilitado no projeto Supabase.
+
+### Painel e tarefas
+
+Cada perfil pode organizar seu painel arrastando blocos, alterando largura/altura e escolhendo quais aparecem. Anotações novas são fixadas no painel por padrão, mas podem ser desmarcadas no formulário. Tarefas são armazenadas separadamente e recebem eventos Realtime; o início e a conclusão registram responsável e horário.
