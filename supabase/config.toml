@@ -1,2 +1,5 @@
 [functions.admin-manage-user]
 verify_jwt = true
+
+[functions.login-by-username]
+verify_jwt = false
